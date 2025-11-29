@@ -53,9 +53,15 @@ class CandleGenerator:
         Returns:
             Completed candle dict or None if still forming
         """
-        tick_timestamp = tick['timestamp']
-        price = tick['price']
-        volume = tick.get('volume', 0.0)
+        # Handle both dict and object (dataclass) access
+        if hasattr(tick, 'timestamp'):
+            tick_timestamp = tick.timestamp
+            price = tick.price
+            volume = getattr(tick, 'volume', 0.0)
+        else:
+            tick_timestamp = tick['timestamp']
+            price = tick['price']
+            volume = tick.get('volume', 0.0)
         
         # Initialize first candle
         if self.current_candle is None:

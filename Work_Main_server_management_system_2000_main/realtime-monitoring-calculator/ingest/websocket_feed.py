@@ -152,6 +152,114 @@ class BitgetWebSocketFeed:
         return list(self.tick_buffer)[-n:]
 
 
+
+class BinanceWebSocketFeed:
+    """
+    Real-time WebSocket feed from Binance exchange
+    Provides incremental ticks and order book updates
+    """
+    
+    def __init__(
+        self,
+        symbol: str = "SOLUSDT",
+        api_key: Optional[str] = None,
+        api_secret: Optional[str] = None,
+        callback: Optional[Callable] = None
+    ):
+        self.symbol = symbol.lower()  # Binance streams use lowercase
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.callback = callback
+        self.ws = None
+        self.running = False
+        self.tick_buffer = deque(maxlen=1000)
+        
+        # Binance WebSocket URLs
+        self.base_url = "wss://stream.binance.com:9443/ws"
+    
+    async def connect(self):
+        """Connect to Binance WebSocket"""
+        try:
+            # Connect directly to the stream for the symbol
+            url = f"{self.base_url}/{self.symbol}@ticker"
+            self.ws = await websockets.connect(url)
+            logger.info(f"Connected to Binance WebSocket: {url}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"WebSocket connection failed: {e}")
+            return False
+    
+    async def start_stream(self):
+        """Start streaming market data"""
+        if not await self.connect():
+            return
+        
+        self.running = True
+        
+        try:
+            async for message in self.ws:
+                data = json.loads(message)
+                
+                # Parse and process tick
+                tick = self._parse_tick(data)
+                if tick:
+                    self.tick_buffer.append(tick)
+                    
+                    # Call callback if provided
+                    if self.callback:
+                        await self.callback(tick)
+                        
+        except websockets.exceptions.ConnectionClosed:
+            logger.warning("WebSocket connection closed")
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+        finally:
+            self.running = False
+    
+    def _parse_tick(self, data: dict) -> Optional[MarketTick]:
+        """Parse raw WebSocket data into MarketTick"""
+        try:
+            # Binance ticker format
+            # {
+            #   "e": "24hrTicker",  # Event type
+            #   "E": 123456789,     # Event time
+            #   "s": "BNBBTC",      # Symbol
+            #   "c": "0.0025",      # Last price
+            #   "v": "10000",       # Total traded base asset volume
+            #   "o": "0.0010",      # Open price
+            #   ...
+            # }
+            
+            if 'c' in data:
+                last_price = float(data.get('c', 0))
+                open_price = float(data.get('o', 0))
+                
+                return MarketTick(
+                    timestamp=datetime.now(),
+                    symbol=self.symbol.upper(),
+                    price=last_price,
+                    volume=float(data.get('v', 0)),
+                    side='buy' if last_price > open_price else 'sell', # Simplified side logic
+                    trade_id=str(data.get('E', 0)) # Use event time as trade ID proxy
+                )
+            return None
+        except Exception as e:
+            logger.error(f"Error parsing tick: {e}")
+            return None
+    
+    async def stop(self):
+        """Stop the stream"""
+        self.running = False
+        if self.ws:
+            await self.ws.close()
+        logger.info("WebSocket stream stopped")
+    
+    def get_latest_ticks(self, n: int = 100) -> list:
+        """Get latest N ticks from buffer"""
+        return list(self.tick_buffer)[-n:]
+
+
 class CandleGenerator:
     """
     Generate OHLCV candles from ticks in real-time
@@ -181,6 +289,9 @@ class CandleGenerator:
         Process tick and return new candle if completed
         Returns None if candle is still forming
         """
+        # Debug print
+        # print(f"DEBUG: Processing tick type: {type(tick)}")
+        
         # Initialize or update current candle
         if not self.current_candle:
             self._start_new_candle(tick)

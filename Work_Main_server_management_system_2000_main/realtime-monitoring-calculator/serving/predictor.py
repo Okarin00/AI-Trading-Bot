@@ -44,12 +44,12 @@ class ModelPredictor:
         """Load model checkpoint"""
         try:
             if self.model_type == "chronos_t5":
-                from chronos_forecasting import Chronos
-                self.model = Chronos.from_pretrained("amazon/chronos-t5-base")
+                from chronos import ChronosPipeline
+                self.model = ChronosPipeline.from_pretrained("amazon/chronos-t5-base")
             
             elif self.model_type == "chronos_bolt":
-                from chronos_forecasting import Chronos
-                self.model = Chronos.from_pretrained("amazon/chronos-bolt-mini")
+                from chronos import ChronosPipeline
+                self.model = ChronosPipeline.from_pretrained("amazon/chronos-bolt-mini")
             
             elif self.model_type == "torchscript":
                 # Load TorchScript model for fastest inference
@@ -62,7 +62,7 @@ class ModelPredictor:
                 self.model = checkpoint['model']
                 self.model.eval()
             
-            self.model.to(self.device)
+            # self.model.to(self.device) # Pipeline handles device
             logger.info(f"Loaded {self.model_type} model: {self.model_path}")
             
             # Warm up model
@@ -80,7 +80,12 @@ class ModelPredictor:
         # Run warm-up inferences
         for _ in range(3):
             with torch.no_grad():
-                _ = self.model(dummy_input)
+                # Extract context for warm-up
+                if len(dummy_input.shape) == 3:
+                    context = dummy_input[:, :, -1]
+                else:
+                    context = dummy_input[:, -1].unsqueeze(0)
+                _ = self.model.predict(context, prediction_length=6)
         
         logger.info("Model warmed up")
     
@@ -122,7 +127,18 @@ class ModelPredictor:
         
         # Inference
         with torch.no_grad():
-            prediction = self.model(tensor)
+            # ChronosPipeline expects context tensor
+            # Assuming features shape is (batch, time, feat) or (time, feat)
+            # Chronos expects 1D time series context for simple prediction
+            # For multivariate, we might need to iterate or use specific method
+            
+            # Simplified usage for now: take the last feature (close price) as context
+            if len(tensor.shape) == 3:
+                context = tensor[:, :, -1] # (batch, time)
+            else:
+                context = tensor[:, -1].unsqueeze(0) # (1, time)
+                
+            prediction = self.model.predict(context, prediction_length=horizon)
         
         # Post-process prediction
         pred_np = prediction.cpu().numpy()

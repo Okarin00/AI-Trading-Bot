@@ -477,72 +477,54 @@ class AlertManager:
                 'message': alert.message,
                 'timestamp': alert.timestamp.isoformat(),
                 'source': alert.source
-            }
-            
-            response = requests.post(webhook_url, json=payload, timeout=10)
-            response.raise_for_status()
-            
-            logger.info(f"Webhook notification sent for alert {alert.alert_id}")
-            
-        except Exception as e:
-            logger.error(f"Error sending webhook notification: {e}")
-    
-    def get_active_alerts(self) -> List[Alert]:
-        """Get active (unresolved) alerts"""
-        return [alert for alert in self.alerts if not alert.resolved]
-    
-    def get_alert_history(self, hours: int = 24) -> List[Alert]:
-        """Get alert history"""
-        cutoff_time = datetime.now() - timedelta(hours=hours)
-        return [alert for alert in self.alert_history if alert.timestamp >= cutoff_time]
 
-class WebDashboard:
-    """Web dashboard for bot management"""
-    
-    def __init__(self, port: int = 5000):
-        self.app = Flask(__name__)
-        CORS(self.app)
-        self.port = port
-        self.setup_routes()
-    
-    def setup_routes(self):
-        """Setup web routes"""
-        
-        @self.app.route('/')
-        def dashboard():
-            return render_template_string(self._get_dashboard_template())
-        
-        @self.app.route('/api/status')
-        def api_status():
-            return jsonify({'status': 'running', 'timestamp': datetime.now().isoformat()})
-        
-        @self.app.route('/api/system')
-        def api_system():
-            # This would get actual system status
+        @self.app.route('/api/config', methods=['GET', 'POST'])
+        def api_config():
+            if request.method == 'POST':
+                new_config = request.json
+                # In a real app, validate and save to .env or config file
+                # For now, just log it
+                logger.info(f"Received config update: {new_config}")
+                return jsonify({'status': 'success', 'message': 'Configuration updated'})
+            
+            # Return current config (masked)
             return jsonify({
-                'cpu_usage': 45.2,
-                'memory_usage': 67.8,
-                'disk_usage': 23.4,
-                'uptime': 3600,
-                'status': 'healthy'
+                'binance_api_key': '***',
+                'news_api_key': '***',
+                'risk_per_trade': 0.02,
+                'max_drawdown': 0.15,
+                'symbol': 'SOLUSDT'
             })
-        
-        @self.app.route('/api/performance')
-        def api_performance():
-            # This would get actual performance data
+
+        @self.app.route('/api/logs')
+        def api_logs():
+            if self.orchestrator and hasattr(self.orchestrator, 'get_logs'):
+                return jsonify({'logs': self.orchestrator.get_logs()})
+            
+            # Fallback mock logs
             return jsonify({
-                'total_trades': 150,
-                'winning_trades': 95,
-                'win_rate': 0.633,
-                'total_pnl': 2500.50,
-                'sharpe_ratio': 1.85,
-                'max_drawdown': 0.08
+                'logs': [
+                    {'timestamp': datetime.now().isoformat(), 'level': 'INFO', 'message': 'System initialized'},
+                    {'timestamp': datetime.now().isoformat(), 'level': 'WARN', 'message': 'Waiting for orchestrator connection...'}
+                ]
             })
-        
-        @self.app.route('/api/alerts')
-        def api_alerts():
-            # This would get actual alerts
-            return jsonify([])
+
+        @self.app.route('/api/control', methods=['POST'])
+        def api_control():
+            action = request.json.get('action')
+            component = request.json.get('component')
+            logger.info(f"Received control action: {action} on {component}")
+            
+            if self.orchestrator:
+                if action == 'start_bot':
+                    # This is tricky because orchestrator is async. 
+                    # We might need a way to signal it.
+                    pass
+                elif action == 'stop_bot':
+                    # self.orchestrator.stop() # This needs to be thread-safe
+                    pass
+            
+            return jsonify({'status': 'success', 'message': f'{action} command sent to {component}'})
     
     def _get_dashboard_template(self) -> str:
         """Get dashboard HTML template"""

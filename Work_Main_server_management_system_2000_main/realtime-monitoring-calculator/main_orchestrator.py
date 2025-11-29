@@ -10,7 +10,9 @@ import time
 from typing import Dict, List
 import numpy as np
 
-from ingest.websocket_feed import BitgetWebSocketFeed
+import os
+from dotenv import load_dotenv
+from ingest.websocket_feed import BitgetWebSocketFeed, BinanceWebSocketFeed
 from ingest.candle_generator import CandleGenerator
 from features.feature_engine import IncrementalFeatureEngine
 from serving.predictor import ModelPredictor, EnsemblePredictor
@@ -93,16 +95,30 @@ class TradingSystemOrchestrator:
         )
         logger.info("✓ Risk manager initialized")
         
-        # 6. WebSocket Feed (will connect on start)
-        api_key = self.config.get('bitget_api_key')
-        api_secret = self.config.get('bitget_api_secret')
+        # 6. WebSocket Feed
+        # Check for Binance keys first as requested
+        binance_api_key = self.config.get('binance_api_key')
+        binance_api_secret = self.config.get('binance_api_secret')
         
-        self.feed = BitgetWebSocketFeed(
-            symbol=symbol,
-            api_key=api_key,
-            api_secret=api_secret,
-            callback=self._on_tick
-        )
+        if binance_api_key:
+            logger.info("Using Binance WebSocket Feed")
+            self.feed = BinanceWebSocketFeed(
+                symbol=symbol,
+                api_key=binance_api_key,
+                api_secret=binance_api_secret,
+                callback=self._on_tick
+            )
+        else:
+            logger.info("Using Bitget WebSocket Feed")
+            api_key = self.config.get('bitget_api_key')
+            api_secret = self.config.get('bitget_api_secret')
+            
+            self.feed = BitgetWebSocketFeed(
+                symbol=symbol,
+                api_key=api_key,
+                api_secret=api_secret,
+                callback=self._on_tick
+            )
         logger.info("✓ WebSocket feed initialized")
         
         logger.info("All components initialized ✓")
@@ -111,6 +127,7 @@ class TradingSystemOrchestrator:
         """Process incoming tick"""
         try:
             # Generate candle if ready
+            # MarketTick is a dataclass, so we pass it directly
             completed_candle = self.candle_gen.process_tick(tick)
             
             if completed_candle:
@@ -254,25 +271,27 @@ def load_config() -> Dict:
                 'name': 'chronos_t5',
                 'type': 'chronos_t5',
                 'path': 'models/chronos_t5.pth',
-                'weight': 0.4
+                'weight': 1.0
             },
-            {
-                'name': 'chronos_bolt',
-                'type': 'chronos_bolt',
-                'path': 'models/chronos_bolt.pth',
-                'weight': 0.3
-            },
-            {
-                'name': 'xgboost',
-                'type': 'torchscript',
-                'path': 'models/xgboost.pth',
-                'weight': 0.3
-            }
+            # {
+            #     'name': 'chronos_bolt',
+            #     'type': 'chronos_bolt',
+            #     'path': 'models/chronos_bolt.pth',
+            #     'weight': 0.3
+            # },
+            # {
+            #     'name': 'xgboost',
+            #     'type': 'torchscript',
+            #     'path': 'models/xgboost.pth',
+            #     'weight': 0.3
+            # }
         ],
         
-        # API credentials (should be in .env)
-        'bitget_api_key': None,  # Load from .env
-        'bitget_api_secret': None  # Load from .env
+        # API credentials
+        'bitget_api_key': os.getenv('BITGET_API_KEY'),
+        'bitget_api_secret': os.getenv('BITGET_API_SECRET'),
+        'binance_api_key': os.getenv('BINANCE_API_KEY'),
+        'binance_api_secret': os.getenv('BINANCE_API_SECRET')
     }
 
 
@@ -281,6 +300,9 @@ async def main():
     logger.info("=" * 60)
     logger.info("AI Crypto Trading System - Real-time Predictor")
     logger.info("=" * 60)
+    
+    # Load environment variables
+    load_dotenv()
     
     # Load configuration
     config = load_config()
